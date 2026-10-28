@@ -35,7 +35,16 @@ data class PopupProps(
     enum class Position { TopRight, TopLeft, BottomRight, BottomLeft, Center }
 
     /** For the log: what kind of popup, never its texts or URLs (a camera URL can carry an access token). */
-    fun summary() = "popup ${media?.javaClass?.simpleName ?: "Text"} at $position for ${duration}s"
+    fun summary(): String {
+        // Named here, not with javaClass.simpleName: R8 renames the classes in a release build.
+        val kind = when (media) {
+            is Media.Video -> "video"
+            is Media.Image -> "image"
+            is Media.Web -> "web"
+            null -> "text"
+        }
+        return "$kind popup at $position for ${duration}s"
+    }
 
     companion object {
         const val MAX_BODY_BYTES = 32 * 1024
