@@ -8,7 +8,9 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "nl.rogro82.pipup"
+        // Its own id: the Play Store beta of upstream PiPup is nl.rogro82.pipup, signed with another key, and the two
+        // must not be taken for one another. The Kotlin package stays nl.rogro82.pipup, as the code is rogro82's.
+        applicationId "io.github.gwiersma.pipup"
         // 26: TYPE_APPLICATION_OVERLAY and notification channels without fallbacks.
         minSdk 26
         targetSdk 34
@@ -16,12 +18,30 @@ android {
         versionName "0.2.0-gwiersma"
     }
 
+    // Release signing from the environment, so neither the keystore nor its password is in the repo:
+    // PIPUP_KEYSTORE is the keystore path, PIPUP_KEYSTORE_PASSWORD_FILE a file holding its password (alias "pipup").
+    // Without them a release build is signed with the local debug key, which is fine for your own TV.
+    def releaseKeystore = System.getenv('PIPUP_KEYSTORE')
+    def releasePasswordFile = System.getenv('PIPUP_KEYSTORE_PASSWORD_FILE')
+    signingConfigs {
+        release {
+            if (releaseKeystore && releasePasswordFile) {
+                def password = new File(releasePasswordFile).text.trim()
+                storeFile file(releaseKeystore)
+                storePassword password
+                keyAlias 'pipup'
+                keyPassword password
+                // v3 lets a later key rotation keep updating existing installs.
+                enableV3Signing true
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // Debug key, as the other self-built apps on the box: replace with your own key for a wider release.
-            signingConfig signingConfigs.debug
+            signingConfig releaseKeystore && releasePasswordFile ? signingConfigs.release : signingConfigs.debug
         }
     }
 
