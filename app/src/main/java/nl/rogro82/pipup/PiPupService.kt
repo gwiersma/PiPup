@@ -170,7 +170,14 @@ class PiPupService : Service(), WebServer.Handler {
     }
 
     override fun handleHttpRequest(session: NanoHTTPD.IHTTPSession?): NanoHTTPD.Response {
-        return session?.let {
+        // Local patch: only the cluster VLAN (Home Assistant runs there) may show popups. Without this any device
+        // on the LAN could put text, pictures or a web page of its choosing over whatever is playing.
+        val remote = session?.remoteIpAddress?.removePrefix("::ffff:")
+        if (remote == null || ALLOWED_SOURCE_PREFIXES.none { remote.startsWith(it) }) {
+            Log.w(LOG_TAG, "refused request from $remote")
+            return newFixedLengthResponse(NanoHTTPD.Response.Status.FORBIDDEN, "text/plain", "forbidden")
+        }
+        return session.let {
             when(session.method) {
                 NanoHTTPD.Method.POST -> {
 
@@ -284,6 +291,7 @@ class PiPupService : Service(), WebServer.Handler {
     companion object {
         const val LOG_TAG = "PiPupService"
         const val SERVER_PORT = 7979
+        val ALLOWED_SOURCE_PREFIXES = listOf("10.10.10.")
         const val ONGOING_NOTIFICATION_ID = 123
         const val MULTIPART_FORM_DATA = "multipart/form-data"
         const val APPLICATION_JSON = "application/json"

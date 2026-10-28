@@ -1,3 +1,8 @@
+> **Fork note (gwiersma/pipup):** this fork adds one local patch: `PiPupService` only accepts requests from
+> `10.10.10.0/24` (see `ALLOWED_SOURCE_PREFIXES`), so other devices on the LAN cannot put popups on the TV.
+> Change that prefix list for your own network before building. Upstream has no licence file; this fork
+> adds none either, so the original author's rights apply unchanged.
+
 # PiPup
 
 PiPup is an application that allows displaying user-defined custom notifications on Android TV.
