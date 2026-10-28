@@ -1,302 +1,185 @@
 package nl.rogro82.pipup
 
-import android.app.*
-import android.content.Context
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
-import android.graphics.BitmapFactory
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
-import android.support.v4.app.NotificationCompat
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import fi.iki.elonen.NanoHTTPD
-import fi.iki.elonen.NanoHTTPD.newFixedLengthResponse
-import java.io.File
+import fi.iki.elonen.NanoHTTPD.Response.Status
+import java.io.ByteArrayOutputStream
 
-
+/**
+ * Keeps a small HTTP server on port 7979 and draws the popups it is sent over whatever is on screen.
+ *
+ * Every request must carry `Authorization: Bearer <token>` and, when an allowlist is set, come from one of its
+ * networks (see [Config]). Bodies are JSON only (multipart uploads are gone: NanoHTTPD writes those to temporary
+ * files) and capped at [PopupProps.MAX_BODY_BYTES].
+ */
 class PiPupService : Service(), WebServer.Handler {
-    private val mHandler: Handler = Handler()
-    private var mOverlay: FrameLayout? = null
-    private var mPopup: PopupView? = null
-    private lateinit var mWebServer: WebServer
+    private val handler = Handler(Looper.getMainLooper())
+    private var overlay: FrameLayout? = null
+    private var popup: PopupView? = null
+    private lateinit var server: WebServer
 
     override fun onCreate() {
         super.onCreate()
-
-        initNotificationChannel("service_channel", "Service channel", "Service channel")
-
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java), 0
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL, "Service", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "Shown while PiPup listens for popups"
+            }
         )
-
-        val mBuilder = NotificationCompat.Builder(this, "service_channel")
+        val open = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = Notification.Builder(this, CHANNEL)
             .setContentTitle("PiPup")
-            .setContentText("Service running")
-            .setContentIntent(pendingIntent)
+            .setContentText("Listening for popups")
+            .setContentIntent(open)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setCategory(Notification.CATEGORY_SERVICE)
-            .setAutoCancel(false)
             .setOngoing(true)
-
-        startForeground(ONGOING_NOTIFICATION_ID, mBuilder.build())
-
-        mWebServer = WebServer(SERVER_PORT, this).apply {
-            start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
         }
 
-        Log.d(LOG_TAG, "WebServer started")
+        server = WebServer(SERVER_PORT, this).apply { start(NanoHTTPD.SOCKET_READ_TIMEOUT, false) }
+        Log.i(LOG_TAG, "listening on $SERVER_PORT" + if (Config.token(this) == null) " (no token set: every request is refused)" else "")
     }
 
     override fun onDestroy() {
+        server.stop()
+        handler.post { removePopup(removeOverlay = true) }
         super.onDestroy()
-
-        mWebServer.stop()
     }
 
-    override fun onBind(intent: Intent): IBinder {
-        TODO("Return the communication channel to the service.")
-    }
+    override fun onBind(intent: Intent): IBinder? = null
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
-    }
-
-    private fun initNotificationChannel(id: String, name: String, description: String) {
-        if (Build.VERSION.SDK_INT < 26) {
-            return
-        }
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channel = NotificationChannel(id, name,
-            NotificationManager.IMPORTANCE_DEFAULT
-        )
-        channel.description = description
-        notificationManager.createNotificationChannel(channel)
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
 
     private fun removePopup(removeOverlay: Boolean = false) {
-
-        mHandler.removeCallbacksAndMessages(null)
-
-        mPopup = mPopup?.let {
-            it.destroy()
-            null
-        }
-
-        mOverlay?.apply {
-
-            removeAllViews()
+        handler.removeCallbacksAndMessages(null)
+        popup?.destroy()
+        popup = null
+        overlay?.let {
+            it.removeAllViews()
             if (removeOverlay) {
-                val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                wm.removeViewImmediate(mOverlay)
-
-                mOverlay = null
+                getSystemService(WindowManager::class.java).removeViewImmediate(it)
+                overlay = null
             }
         }
     }
 
-    @Suppress("DEPRECATION")
-    private fun createPopup(popup: PopupProps) {
+    private fun showPopup(props: PopupProps) {
         try {
-
-            Log.d(LOG_TAG, "Create popup: $popup")
-
-            // remove current popup
-
             removePopup()
-
-            // create or reuse the current overlay
-
-            mOverlay = when (val overlay = mOverlay) {
-                is FrameLayout -> overlay
-                else -> FrameLayout(this).apply {
-
-                    setPadding(20, 20, 20, 20)
-
-                    val layoutFlags: Int = when {
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O -> WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        else -> WindowManager.LayoutParams.TYPE_TOAST
-                    }
-
-                    val params = WindowManager.LayoutParams(
-                        WindowManager.LayoutParams.MATCH_PARENT,
-                        WindowManager.LayoutParams.MATCH_PARENT,
-                        layoutFlags,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                        PixelFormat.TRANSLUCENT
-                    )
-
-                    val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                    wm.addView(this, params)
-                }
-            }.also {
-
-                // inflate the popup layout
-
-                mPopup = PopupView.build(this, popup)
-
-                it.addView(mPopup, FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ). apply {
-
-                    // position the popup
-
-                    gravity = when(popup.position) {
-                        PopupProps.Position.TopRight -> Gravity.TOP or Gravity.END
-                        PopupProps.Position.TopLeft -> Gravity.TOP or Gravity.START
-                        PopupProps.Position.BottomRight -> Gravity.BOTTOM or Gravity.END
-                        PopupProps.Position.BottomLeft -> Gravity.BOTTOM or Gravity.START
-                        PopupProps.Position.Center -> Gravity.CENTER
-                    }
-                })
+            val frame = overlay ?: FrameLayout(this).also {
+                it.setPadding(20, 20, 20, 20)
+                // Never takes focus or touches: the remote keeps controlling what is playing underneath.
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                    PixelFormat.TRANSLUCENT
+                )
+                getSystemService(WindowManager::class.java).addView(it, params)
+                overlay = it
             }
-
-            // schedule removal
-
-            mHandler.postDelayed({
-                removePopup(true)
-            }, (popup.duration * 1000).toLong())
-
-        } catch (ex: Throwable) {
-            ex.printStackTrace()
+            val view = PopupView.build(this, props)
+            popup = view
+            frame.addView(view, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                when (props.position) {
+                    PopupProps.Position.TopRight -> Gravity.TOP or Gravity.END
+                    PopupProps.Position.TopLeft -> Gravity.TOP or Gravity.START
+                    PopupProps.Position.BottomRight -> Gravity.BOTTOM or Gravity.END
+                    PopupProps.Position.BottomLeft -> Gravity.BOTTOM or Gravity.START
+                    PopupProps.Position.Center -> Gravity.CENTER
+                }
+            ))
+            handler.postDelayed({ removePopup(removeOverlay = true) }, props.duration * 1000L)
+        } catch (e: Exception) {
+            // Most often the overlay permission is missing: appops set nl.rogro82.pipup SYSTEM_ALERT_WINDOW allow
+            Log.e(LOG_TAG, "popup not shown: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 
-    override fun handleHttpRequest(session: NanoHTTPD.IHTTPSession?): NanoHTTPD.Response {
-        // Local patch: only the cluster VLAN (Home Assistant runs there) may show popups. Without this any device
-        // on the LAN could put text, pictures or a web page of its choosing over whatever is playing.
-        val remote = session?.remoteIpAddress?.removePrefix("::ffff:")
-        if (remote == null || ALLOWED_SOURCE_PREFIXES.none { remote.startsWith(it) }) {
-            Log.w(LOG_TAG, "refused request from $remote")
-            return newFixedLengthResponse(NanoHTTPD.Response.Status.FORBIDDEN, "text/plain", "forbidden")
+    override fun handleHttpRequest(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        val remote = session.remoteIpAddress
+        val token = Config.token(this) ?: return reply(Status.SERVICE_UNAVAILABLE, "no token configured")
+        if (!Config.sourceAllowed(Config.allowList(this), remote)) {
+            Log.w(LOG_TAG, "refused request from $remote: not in the allowlist")
+            return reply(Status.FORBIDDEN, "forbidden")
         }
-        return session.let {
-            when(session.method) {
-                NanoHTTPD.Method.POST -> {
+        if (!Config.tokenMatches(token, session.headers["authorization"])) {
+            Log.w(LOG_TAG, "refused request from $remote: missing or wrong token")
+            return reply(Status.UNAUTHORIZED, "unauthorized")
+        }
+        if (session.method != NanoHTTPD.Method.POST) return reply(Status.METHOD_NOT_ALLOWED, "POST only")
 
-                    when(session.uri) {
-                        "/cancel" -> {
-                            mHandler.post {
-                                removePopup(true)
-                            }
-                            OK()
-                        }
-                        "/notify" -> {
-                            try {
-                                val contentType = session.headers["content-type"] ?: APPLICATION_JSON
-                                val popup = when {
-                                    contentType.startsWith(APPLICATION_JSON) -> {
-
-                                        // try to handle it as json
-
-                                        val contentLength = session.headers["content-length"]?.toInt() ?: 0
-                                        val content = ByteArray(contentLength)
-
-                                        session.inputStream.read(content, 0, contentLength)
-
-                                        Json.readValue(content, PopupProps::class.java)
-                                            ?: throw Exception("failed to parse input")
-
-                                    }
-                                    contentType.startsWith(MULTIPART_FORM_DATA) -> {
-
-                                        val files = mutableMapOf<String, String>()
-                                        session.parseBody(files)
-
-                                        // flatten parameters
-
-                                        val params = session.parameters.mapValues { it.value.firstOrNull() }
-
-                                        val duration = params["duration"]?.toIntOrNull()
-                                            ?: PopupProps.DEFAULT_DURATION
-
-                                        val position = PopupProps.Position.values()[params["position"]?.toIntOrNull() ?: 0]
-
-                                        val backgroundColor = params["backgroundColor"]
-                                            ?: PopupProps.DEFAULT_BACKGROUND_COLOR
-
-                                        val title = params["title"]
-
-                                        val titleSize = params["titleSize"]?.toFloatOrNull()
-                                            ?: PopupProps.DEFAULT_TITLE_SIZE
-
-                                        val titleColor = params["titleColor"]
-                                            ?: PopupProps.DEFAULT_TITLE_COLOR
-
-                                        val message = params["message"]
-
-                                        val messageSize = params["messageSize"]?.toFloatOrNull()
-                                            ?: PopupProps.DEFAULT_TITLE_SIZE
-
-                                        val messageColor = params["messageColor"]
-                                            ?: PopupProps.DEFAULT_TITLE_COLOR
-
-                                        val media = when(val image = files["image"]) {
-                                            is String -> {
-                                                File(image).absoluteFile.let {
-                                                    val bitmap = BitmapFactory.decodeStream(it.inputStream())
-                                                    val imageWidth = params["imageWidth"]?.toIntOrNull() ?: PopupProps.DEFAULT_MEDIA_WIDTH
-
-                                                    PopupProps.Media.Bitmap(image = bitmap, width = imageWidth)
-                                                }
-                                            }
-                                            else -> null
-                                        }
-
-                                        PopupProps(
-                                            duration = duration,
-                                            position = position,
-                                            backgroundColor =  backgroundColor,
-                                            title = title,
-                                            titleSize = titleSize,
-                                            titleColor = titleColor,
-                                            message = message,
-                                            messageSize = messageSize,
-                                            messageColor = messageColor,
-                                            media = media
-                                        )
-                                    }
-                                    else -> throw Exception("invalid content-type")
-                                }
-
-                                Log.d(LOG_TAG, "received popup: $popup")
-
-                                mHandler.post {
-                                    createPopup(popup)
-                                }
-
-                                OK("$popup")
-
-
-                            } catch (ex: Throwable) {
-                                Log.e(LOG_TAG, ex.message)
-                                InvalidRequest(ex.message)
-                            }
-                        }
-                        else -> InvalidRequest("unknown uri: ${session.uri}")
-                    }
-                }
-                else -> InvalidRequest("invalid method")
+        return when (session.uri) {
+            "/cancel" -> {
+                handler.post { removePopup(removeOverlay = true) }
+                reply(Status.OK, "ok")
             }
-        } ?: InvalidRequest()
+            "/notify" -> {
+                if (session.headers["content-type"]?.startsWith(APPLICATION_JSON) != true) {
+                    return reply(Status.UNSUPPORTED_MEDIA_TYPE, "application/json only")
+                }
+                val body = readBody(session) ?: return reply(Status.PAYLOAD_TOO_LARGE, "body over ${PopupProps.MAX_BODY_BYTES} bytes")
+                try {
+                    val props = PopupProps.parse(body)
+                    Log.i(LOG_TAG, "showing ${props.summary()}")
+                    handler.post { showPopup(props) }
+                    reply(Status.OK, "ok")
+                } catch (e: IllegalArgumentException) {
+                    reply(Status.BAD_REQUEST, e.message ?: "invalid popup")
+                }
+            }
+            else -> reply(Status.NOT_FOUND, "unknown path")
+        }
     }
+
+    /** The whole body, or null when it is (or claims to be) over the limit. A single read() can return less. */
+    private fun readBody(session: NanoHTTPD.IHTTPSession): String? {
+        val declared = session.headers["content-length"]?.toLongOrNull() ?: return ""
+        if (declared < 0 || declared > PopupProps.MAX_BODY_BYTES) return null
+        val out = ByteArrayOutputStream(declared.toInt())
+        val buffer = ByteArray(4096)
+        var remaining = declared.toInt()
+        while (remaining > 0) {
+            val n = session.inputStream.read(buffer, 0, minOf(buffer.size, remaining))
+            if (n < 0) break
+            out.write(buffer, 0, n)
+            remaining -= n
+        }
+        return out.toString(Charsets.UTF_8.name())
+    }
+
+    private fun reply(status: Status, text: String) = NanoHTTPD.newFixedLengthResponse(status, "text/plain", text)
 
     companion object {
         const val LOG_TAG = "PiPupService"
         const val SERVER_PORT = 7979
-        val ALLOWED_SOURCE_PREFIXES = listOf("10.10.10.")
-        const val ONGOING_NOTIFICATION_ID = 123
-        const val MULTIPART_FORM_DATA = "multipart/form-data"
-        const val APPLICATION_JSON = "application/json"
-
-        fun OK(message: String? = null): NanoHTTPD.Response = newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "text/plain", message)
-        fun InvalidRequest(message: String? = null): NanoHTTPD.Response = newFixedLengthResponse(NanoHTTPD.Response.Status.BAD_REQUEST, "text/plain", "invalid request: $message")
+        private const val CHANNEL = "service_channel"
+        private const val NOTIFICATION_ID = 123
+        private const val APPLICATION_JSON = "application/json"
     }
 }

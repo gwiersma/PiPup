@@ -16,7 +16,6 @@ package nl.rogro82.pipup
 
 import android.app.Activity
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
@@ -28,35 +27,22 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // start service in foreground
+        val status = findViewById<TextView>(R.id.textViewConnection)
+        val address = findViewById<TextView>(R.id.textViewServerAddress)
 
-        val textViewConnection = findViewById<TextView>(R.id.textViewServerAddress)
-        val textViewServerAddress = findViewById<TextView>(R.id.textViewServerAddress)
-
-        when(val ipAddress = getIpAddress()) {
-            is String -> {
-                textViewConnection.setText(R.string.server_running)
-                textViewServerAddress.apply {
-                    visibility = View.VISIBLE
-                    text = resources.getString(
-                        R.string.server_address,
-                        ipAddress,
-                        PiPupService.SERVER_PORT
-                    )
-                }
-            }
-            else -> {
-                textViewConnection.setText(R.string.no_network_connection)
-                textViewServerAddress.visibility = View.INVISIBLE
-            }
-        }
-
-
-        val serviceIntent = Intent(this, PiPupService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
+        val ip = getIpAddress()
+        if (ip == null) {
+            status.setText(R.string.no_network_connection)
+            address.visibility = View.INVISIBLE
         } else {
-            startService(serviceIntent)
+            status.setText(R.string.server_running)
+            address.visibility = View.VISIBLE
+            // Whether it is configured, never the token itself.
+            val token = if (Config.token(this) != null) "token set" else "no token: every request is refused"
+            val allow = Config.allowListText(this).ifEmpty { "any source" }
+            address.text = getString(R.string.server_address, ip, PiPupService.SERVER_PORT) + "\n" + token + " · allow: " + allow
         }
+
+        startForegroundService(Intent(this, PiPupService::class.java))
     }
 }

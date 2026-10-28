@@ -1,43 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
-<android.support.constraint.ConstraintLayout
-        xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:tools="http://schemas.android.com/tools"
-        android:layout_height="match_parent"
-        android:layout_width="match_parent" android:layout_gravity="center" android:id="@+id/mainLayout"
-        android:background="@color/ic_launcher_background">
-    <ImageView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mainLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ic_launcher_background">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <ImageView
             android:id="@+id/imageViewLogo"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            android:src="@drawable/ic_banner"/>
-    <TextView
-            android:text="@string/server_running"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:contentDescription="@string/app_name"
+            android:src="@drawable/ic_banner" />
+
+        <TextView
             android:id="@+id/textViewConnection"
-            app:layout_constraintTop_toBottomOf="@+id/imageViewLogo"
-            app:layout_constraintStart_toStartOf="@+id/imageViewLogo"
-            app:layout_constraintEnd_toEndOf="@+id/imageViewLogo" android:textStyle="bold"
-            android:layout_marginTop="16dp"/>
-    <TextView
-            android:text="@string/more_information"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:linksClickable="true"
-            android:id="@+id/textViewInfo"
-            app:layout_constraintBottom_toBottomOf="parent"
-            android:layout_marginBottom="24dp" app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" android:layout_marginStart="24dp"
-            android:layout_marginEnd="24dp"/>
-    <TextView
-            android:text="-"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/server_running"
+            android:textStyle="bold" />
+
+        <TextView
             android:id="@+id/textViewServerAddress"
-            app:layout_constraintEnd_toEndOf="@+id/textViewConnection"
-            android:layout_marginTop="4dp" app:layout_constraintTop_toBottomOf="@+id/textViewConnection"
-            app:layout_constraintStart_toStartOf="@+id/textViewConnection"/>
-</android.support.constraint.ConstraintLayout>
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center_horizontal"
+            android:text="-" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/textViewInfo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="24dp"
+        android:text="@string/more_information" />
+</FrameLayout>

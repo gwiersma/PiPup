@@ -2,12 +2,10 @@ package nl.rogro82.pipup
 
 import fi.iki.elonen.NanoHTTPD
 
-class WebServer(port: Int, private val handler: Handler): NanoHTTPD(port) {
+class WebServer(port: Int, private val handler: Handler) : NanoHTTPD(port) {
     interface Handler {
-        fun handleHttpRequest(session: IHTTPSession?): Response
+        fun handleHttpRequest(session: IHTTPSession): Response
     }
 
-    override fun serve(session: IHTTPSession?): Response {
-        return handler.handleHttpRequest(session)
-    }
+    override fun serve(session: IHTTPSession): Response = handler.handleHttpRequest(session)
 }

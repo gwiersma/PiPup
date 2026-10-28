@@ -1,7 +1,23 @@
-> **Fork note (gwiersma/pipup):** this fork adds one local patch: `PiPupService` only accepts requests from
-> `10.10.10.0/24` (see `ALLOWED_SOURCE_PREFIXES`), so other devices on the LAN cannot put popups on the TV.
-> Change that prefix list for your own network before building. Upstream has no licence file; this fork
-> adds none either, so the original author's rights apply unchanged.
+> **This fork (gwiersma/PiPup)** brings the 2019 app up to current Android and security standards. What changed,
+> and why:
+>
+> - **Authentication.** Every request needs the shared token (`Authorization: Bearer <token>`, or the bare token),
+>   compared in constant time. No token configured means every request is refused, so a fresh install is not an
+>   open overlay on the LAN. An optional IPv4 allowlist (CIDR) narrows the sources further.
+> - **Configuration over ADB only**, through a receiver guarded by `WRITE_SECURE_SETTINGS` (see below).
+> - **No multipart uploads.** NanoHTTPD writes those to temporary files (CVE-2022-21230); JSON only, at most
+>   32 KiB, read in full.
+> - **No Jackson, Glide or support libraries** (unmaintained, with known CVEs in the 2.9 Jackson line): JSON is the
+>   platform's `org.json`, images are one bounded https download. The APK went from 5 MB to about 110 KB.
+> - **Media URIs are checked:** `https` (and `rtsp` for video, `data:` for web); never `file:`, `content:` or
+>   cleartext `http:`. The WebView runs without JavaScript, file or content access, and cannot navigate away.
+> - **Validated input:** durations, sizes and colours are clamped or rejected with a 400.
+> - **Nothing sensitive in logcat:** only the popup's type, position and duration, never texts or URLs (a camera URL
+>   can carry an access token).
+> - **Android 14:** targetSdk 34, `specialUse` foreground service, immutable PendingIntent, no exported service,
+>   no backup, overlay that never takes focus or touches. Builds with AGP 8.5, Gradle 8.9, Kotlin 2.0, JDK 17.
+>
+> Upstream has no licence file and this fork adds none, so the original author's rights apply unchanged.
 
 # PiPup
 
@@ -34,6 +50,17 @@ To give the application the required permission to draw overlays you will need t
 ```
 adb shell appops set nl.rogro82.pipup SYSTEM_ALERT_WINDOW allow
 ```
+
+Then set the token (24 characters or more; keep it in a file so it stays out of your shell history) and, if you
+like, the networks allowed to send popups. The result comes back as the broadcast's data, never the token:
+```
+adb shell am broadcast -n nl.rogro82.pipup/.ConfigReceiver -a nl.rogro82.pipup.CONFIGURE \
+    --es token "$(cat token.txt)" --es allow 10.10.10.0/24
+```
+`--es allow ""` allows any source; `--ez clear true` removes both, after which every request is refused.
+
+Requests answer `401` without the right token, `403` from outside the allowlist, `503` while no token is set,
+`413` over 32 KiB and `400` with a reason for anything invalid.
 
 ## Integrating
 
@@ -75,30 +102,6 @@ All fields are optional and for `media` you can specify 3 types:
 { "video": { "uri": "address_to_your_video", "width": 480 }}
 { "web":   { "uri": "address_to_your_resource", "width": 640, "height": 480 }}
 ```
-
-#### To send notifications with an image file use multipart/form-data
-
-| Property      | Value               |
-| ------------- | ------------------- |
-| Path:         | /notify             |
-| Method:       | POST                |
-| Content-Type: | multipart/form-data |
-
-Form-fields:
-
-| Field           | Type                                         |
-| --------------- | -------------------------------------------- |
-| duration        | Integer (default=30)                         |
-| position        | Integer (0..4, default=0)                    |
-| title           | String                                       |
-| titleSize       | Integer (default=16)                         |
-| titleColor      | string (default=#FFFFFF, format=[AA]RRGGBB   |
-| message         | String                                       |
-| messageSize     | Integer (default=12)                         |
-| messageColor    | String (default=#FFFFFF, format=[AA]RRGGBB   |
-| backgroundColor | String (default=#CC000000, format=[AA]RRGGBB |
-| image           | File                                         |
-| imageWidth      | Integer (default=480)                        |
 
 `position` is an enum ranging from 0 to 4
 

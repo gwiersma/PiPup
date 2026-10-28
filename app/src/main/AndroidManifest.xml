@@ -1,55 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          xmlns:tools="http://schemas.android.com/tools"
-          tools:ignore="GoogleAppIndexingWarning"
-          package="nl.rogro82.pipup">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <uses-feature
-            android:name="android.hardware.touchscreen"
-            android:required="false"/>
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
     <uses-feature
-            android:name="android.software.leanback"
-            android:required="true"/>
+        android:name="android.software.leanback"
+        android:required="true" />
 
+    <!-- No backup: the shared token must not leave the device. No cleartext: popups load https (and data:) only. -->
     <application
-            android:allowBackup="true"
-            android:icon="@mipmap/ic_launcher"
-            android:label="@string/app_name"
-            android:supportsRtl="true"
-            android:theme="@style/AppTheme">
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="false">
+
+        <!-- Only the system delivers BOOT_COMPLETED, so the receiver needs no export. -->
         <receiver
-                android:name=".Receiver"
-                android:enabled="true"
-                android:exported="true">
+            android:name=".Receiver"
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
-                <action android:name="android.net.wifi.WIFI_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Token and source allowlist, set over ADB only: WRITE_SECURE_SETTINGS is held by the shell, not by apps. -->
+        <receiver
+            android:name=".ConfigReceiver"
+            android:exported="true"
+            android:permission="android.permission.WRITE_SECURE_SETTINGS">
+            <intent-filter>
+                <action android:name="nl.rogro82.pipup.CONFIGURE" />
             </intent-filter>
         </receiver>
 
         <service
-                android:name=".PiPupService"
-                android:enabled="true"
-                android:exported="true">
+            android:name=".PiPupService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local HTTP endpoint that shows notification popups over other apps on a TV" />
         </service>
 
         <activity
-                android:name=".MainActivity"
-                android:label="@string/app_name"
-                android:banner="@drawable/ic_banner"
-                android:icon="@drawable/ic_banner"
-                android:logo="@drawable/ic_banner"
-                android:screenOrientation="landscape">
+            android:name=".MainActivity"
+            android:banner="@drawable/ic_banner"
+            android:exported="true"
+            android:icon="@drawable/ic_banner"
+            android:label="@string/app_name"
+            android:logo="@drawable/ic_banner"
+            android:screenOrientation="landscape">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
     </application>
