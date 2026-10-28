@@ -1,5 +1,7 @@
+# Replace IP and TOKEN. Without the Authorization header PiPup answers 401.
 POST http://IP:7979/notify HTTP/1.1
 content-type: application/json
+authorization: Bearer TOKEN
 
 {
   "duration": 30,

@@ -26,7 +26,12 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        startForegroundService(Intent(this, PiPupService::class.java))
+    }
 
+    // On resume, not on create: a token set over ADB while this screen is open shows when you come back to it.
+    override fun onResume() {
+        super.onResume()
         val status = findViewById<TextView>(R.id.textViewConnection)
         val address = findViewById<TextView>(R.id.textViewServerAddress)
 
@@ -38,11 +43,9 @@ class MainActivity : Activity() {
             status.setText(R.string.server_running)
             address.visibility = View.VISIBLE
             // Whether it is configured, never the token itself.
-            val token = if (Config.token(this) != null) "token set" else "no token: every request is refused"
-            val allow = Config.allowListText(this).ifEmpty { "any source" }
-            address.text = getString(R.string.server_address, ip, PiPupService.SERVER_PORT) + "\n" + token + " · allow: " + allow
+            val token = getString(if (Config.token(this) != null) R.string.token_set else R.string.token_missing)
+            val allow = Config.allowListText(this).ifEmpty { getString(R.string.allow_any) }
+            address.text = getString(R.string.server_status, ip, PiPupService.SERVER_PORT, token, allow)
         }
-
-        startForegroundService(Intent(this, PiPupService::class.java))
     }
 }
